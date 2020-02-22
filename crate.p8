@@ -1,0 +1,1224 @@
+pico-8 cartridge // http://www.pico-8.com
+version 18
+__lua__
+
+-- global vars
+ent_table = {}
+classes = {}
+
+room = 0
+room_x = 0
+room_y = 0
+
+flag_solid = 0
+
+gravity = 0.2
+
+test = "test"
+
+load_timer = 0
+
+
+-- core loop
+function _init()
+    map_load()
+end
+
+function _update60()
+    -- update
+    for e in all(ent_table) do
+        if e.update != nil then
+            e.update(e)
+        end
+    end
+
+    -- move
+    for e in all(ent_table) do
+        if e.is_using_gravity then
+            e.speed_y += gravity
+        end
+
+        if e.is_moving and (e.speed_x != 0 or e.speed_y != 0) then
+            move(e)
+        end
+    end
+
+
+    if load_timer > 0 then
+        load_timer -= 1
+
+        if load_timer == 0 then
+            map_load()
+        end
+    end
+
+end
+
+function _draw()
+    --cursor(0, 0)
+    cls()
+    --map()
+    map(0, 0, 0, 0, 128, 64)
+
+    for e in all(ent_table) do
+        e.draw(e)
+    end
+
+    --cursor(room_x * 128, room_y * 128)
+    color(8)
+    print("stat: "..stat(1), room_x * 128, room_y * 128)
+    print("ent: "..count(ent_table), room_x * 128, room_y * 128 + 7)
+    print("room: "..room, room_x * 128, room_y * 128 + 14)
+end
+
+-- global funcs
+
+-- too lazy to type + 0.5 every time
+function round(arg)
+    return flr(arg + 0.5)
+end
+
+-- convert bool to number
+function numbool(arg)
+    if arg then
+        return 1
+    else
+        return 0
+    end
+end
+
+
+-- axis aligned bounding box
+-- description from: https://love2d.org/wiki/BoundingBox.lua
+-- Collision detection function;
+-- Returns true if two boxes overlap, false if they don't;
+-- x1,y1 are the top-left coords of the first box, while w1,h1 are its width and height;
+-- x2,y2,w2 & h2 are the same, but for the second box.
+function aabb(x1,y1,w1,h1, x2,y2,w2,h2)
+    return x1 < x2+w2 and
+           x2 < x1+w1 and
+           y1 < y2+h2 and
+           y2 < y1+h1
+end
+
+-- check tilemap for flag_solid
+function check_solid_tile_x(this, distance)
+    local check_up = false
+    local check_down = false
+    local y1 = flr(this.y / 8)
+    local y2 = flr((this.y + this.hitbox_y - 1) / 8)
+
+    -- left
+    if distance == -1 then
+        local x = flr((this.x - 1) / 8)
+        check_up = fget(mget(x, y1), flag_solid)
+        check_down = fget(mget(x, y2), flag_solid)
+
+    -- right
+    elseif distance == 1 then
+        local x = flr((this.x + this.hitbox_x) / 8)
+        check_up = fget(mget(x, y1), flag_solid)
+        check_down = fget(mget(x, y2), flag_solid)
+    end
+
+    return check_up or check_down
+end
+
+-- check tilemap for flag_solid
+function check_solid_tile_y(this, distance)
+    local check_left = false
+    local check_right = false
+    local x1 = flr(this.x / 8)
+    local x2 = flr((this.x + this.hitbox_x - 1) / 8)
+
+    -- up
+    if distance == -1 then
+        local y = flr((this.y - 1) / 8)
+        check_left = fget(mget(x1, y), flag_solid)
+        check_right = fget(mget(x2, y), flag_solid)
+
+    -- down
+    elseif distance == 1 then
+        local y = flr((this.y + this.hitbox_y) / 8)
+        check_left = fget(mget(x1, y), flag_solid)
+        check_right = fget(mget(x2, y), flag_solid)
+    end
+
+    return check_left or check_right
+end
+
+-- aabb but for tiles
+function check_solid_tile_overlap(this)
+    -- check 1, 2, 3, 4
+    local c1 = false
+    local c2 = false
+    local c3 = false
+    local c4 = false
+
+    local x1 = flr(this.x / 8)
+    local y1 = flr(this.y / 8)
+
+    local x2 = flr((this.x + this.hitbox_x - 1) / 8)
+    local y2 = flr((this.y + this.hitbox_y - 1) / 8)
+
+    c1 = fget(mget(x1, y1), flag_solid)
+    c2 = fget(mget(x2, y1), flag_solid)
+    c3 = fget(mget(x1, y2), flag_solid)
+    c4 = fget(mget(x2, y2), flag_solid)
+
+    return c1 or c2 or c3 or c4
+end
+
+-- only checks for solid entities
+-- dx, dy = distance x and y
+function check_solid_entities(this, dx, dy)
+    local hit = false
+
+    for e in all(ent_table) do
+        if e != this and e.is_solid then
+            if aabb(this.x + dx, this.y + dy, this.hitbox_x, this.hitbox_y, e.x, e.y, e.hitbox_x, e.hitbox_y) then
+                hit = true
+                break
+            end
+        end
+    end
+
+    return hit
+end
+
+-- check tilemap, and then check entities
+function check_solid_x(this, distance)
+    local hit = false
+    hit = check_solid_tile_x(this, distance)
+
+    if not hit then
+        hit = check_solid_entities(this, distance, 0)
+    end
+
+    return hit
+end
+
+-- check tilemap, and then check entities
+function check_solid_y(this, distance)
+    local hit = false
+    hit = check_solid_tile_y(this, distance)
+
+    if not hit then
+        hit = check_solid_entities(this, 0, distance)
+    end
+
+    return hit
+end
+
+
+-- move entity
+function move(this)
+
+    -- clear bools
+    this.has_moved_x = false
+    this.has_moved_y = false
+    this.has_hit_up = false
+    this.has_hit_down = false
+    this.has_hit_left = false
+    this.has_hit_right = false
+
+    local dy -- distance y
+    this.remainder_y += this.speed_y
+    dy = round(this.remainder_y)
+    this.remainder_y -= dy
+    if dy != 0 then
+        move_y(this, dy)
+    end
+
+    local dx -- distance x
+    this.remainder_x += this.speed_x
+    dx = round(this.remainder_x)
+    this.remainder_x -= dx
+    if dx != 0 then
+        move_x(this, dx)
+    end
+
+end
+
+-- move x axis
+function move_x(this, dist)
+    local hit = false
+    this.has_moved_x = true
+    if this.is_colliding then
+        local step = sgn(dist)
+        for i=1, abs(dist) do
+            if not check_solid_x(this, step) then
+                    this.x += step
+            else
+                this.speed_x = 0
+                this.remainder_x = 0
+
+                if step == -1 then
+                    this.has_hit_left = true
+                else
+                    this.has_hit_right = true
+                end
+
+                hit = true
+
+                break
+            end
+        end
+    else
+        this.x += dist
+    end
+
+    return hit
+end
+
+-- move y axis
+function move_y(this, dist)
+    local hit = false
+    this.has_moved_y = true
+    this.is_on_floor = false
+    if this.is_colliding then
+        local step = sgn(dist)
+        for i=1, abs(dist) do
+            if not check_solid_y(this, step) then
+                    this.y += step
+            else
+                this.speed_y = 0
+                this.remainder_y = 0
+
+                if step == -1 then
+                    this.has_hit_up = true
+                else
+                    this.has_hit_down = true
+                    this.is_on_floor = true
+                end
+
+                hit = true
+
+                break
+            end
+        end
+    else
+        this.x += dist
+    end
+
+    return hit
+end
+
+-- used to instantiate a new entity
+function entity_create(class, x, y)
+    local ent = {}
+
+    -- copy keys from base class
+    for k, v in pairs(class_base) do ent[k] = v end
+
+    -- override keys from inherited class
+    for k, v in pairs(class) do ent[k] = v end
+
+    -- set position
+    ent.x = x
+    ent.y = y
+
+    -- initialize
+    if ent.init != nil then
+        ent.init(ent)
+    end
+
+    add(ent_table, ent)
+    return ent
+end
+
+-- remove entity instance from table
+function entity_remove(ent)
+    del(ent_table, ent)
+end
+
+function entity_check(this, x, y, class, ignore)
+    local ent = nil
+
+    for e in all(ent_table) do
+        if e != this and e.name == class.name and e != ignore then
+            if aabb(x, y, this.hitbox_x, this.hitbox_y, e.x, e.y, e.hitbox_x, e.hitbox_y) then
+                ent = e
+                break
+            end
+        end
+    end
+
+    return ent
+end
+
+
+-- iterate though map tiles and create entities
+function map_load()
+    -- remove entities
+    ent_table = {}
+
+    -- reload map data from cartridge
+    reload(0x2000, 0x2000, 0x1000)
+
+    -- room position
+    local ry = flr(room / 8)
+    local rx = room - (ry * 8)
+
+    -- room coords
+    room_x = rx
+    room_y = ry
+    -- set camera
+    camera(room_x * 128, room_y * 128)
+
+    -- tile coords
+    ry = ry * 16
+    rx = rx * 16
+
+    -- look at map
+    for y = 0, 15 do
+        for x = 0, 15 do
+            local tile = mget(rx + x, ry + y)
+            if tile != 0 then
+                foreach(classes,
+                function(class)
+                    if class.sprite == tile then
+                        -- create entity
+                        local ent = entity_create(class, ((rx + x) * 8), ((ry + y) * 8))
+                        -- adjust position based on sprite offset
+                        ent.x += ent.sprite_x
+                        ent.y += ent.sprite_y
+                        -- clear tile on map
+                        mset(rx + x, ry + y, 0)
+                    end
+                end)
+            end
+        end
+    end
+
+end
+
+-- classes
+
+-- all classes inherit from class_base
+class_base = {
+    name = "base",
+    x = 0,
+    y = 0,
+
+    speed_x = 0,
+    speed_y = 0,
+
+    remainder_x = 0,
+    remainder_y = 0,
+
+    sprite = -1,
+    sprite_x = 0,
+    sprite_y = 0,
+
+    draw_offset_x = 0,
+    draw_offset_y = 0,
+
+    flip_x = false,
+    flip_y = false,
+
+    hitbox_x = 8,
+    hitbox_y = 8,
+
+    is_moving = false,
+    is_solid = false,
+    is_colliding = false,
+    is_using_gravity = false,
+
+    has_moved_x = false,
+    has_moved_y = false,
+
+    has_hit_up = false,
+    has_hit_down = false,
+    has_hit_left = false,
+    has_hit_right = false,
+
+    is_on_floor = false,
+
+    init = nil,
+    update = nil,
+    draw = function(this)
+        spr(this.sprite, this.x - this.sprite_x + this.draw_offset_x, this.y - this.sprite_y + this.draw_offset_y, 1, 1, this.flip_x, this.flip_y)
+    end
+}
+add(classes, class_base)
+
+class_player = {
+    name = "player",
+    sprite = 4,
+    sprite_x = 2,
+    sprite_y = 1,
+
+    hitbox_x = 4,
+    hitbox_y = 7,
+
+    is_moving = true,
+    is_solid = true,
+    is_colliding = true,
+    is_using_gravity = true,
+
+    move_speed = 1,
+    jump_speed = 3.3,
+
+    anim_frame = 0,
+    anim_step_run = 0.2,
+    anim_step_idle = 0.04,
+
+    is_holding_crate = false,
+
+    speed_drop_x = 0.7,
+    speed_drop_y = -1,
+
+    speed_throw_x = 1.7,
+    speed_throw_y = -2.5,
+
+    speed_throw_high_x = 0.7,
+    speed_throw_high_y = -3.5,
+
+    init = function(this)
+        --this.pickup_crate(this)
+    end,
+
+    update = function(this)
+        -- check for spikes
+        if entity_check(this, this.x, this.y, class_spike) != nil then
+            if this.is_holding_crate then
+                this.crate_throw(this)
+            end
+
+            entity_create(class_explode, this.x + 1, this.y + 3)
+            entity_remove(this)
+            load_timer = 30
+            return 0
+        end
+
+        -- check for exit
+        if not this.is_holding_crate then
+            if entity_check(this, this.x, this.y, class_exit) != nil then
+                entity_create(class_explode, this.x + 1, this.y + 3)
+                entity_remove(this)
+                room += 1
+                load_timer = 30
+                return 0
+            end
+        end
+
+        -- animation
+        if this.is_on_floor then
+            -- idle
+            if this.speed_x == 0 then
+                this.anim_frame += this.anim_step_idle
+
+                if this.anim_frame >= 2 then
+                    this.anim_frame = mid(0, this.anim_frame - 2, 1.99)
+                end
+
+                if flr(this.anim_frame) == 0 then
+                    this.sprite = 4
+                elseif flr(this.anim_frame) == 1 then
+                    this.sprite = 7
+                    -- this frame is half as long
+                    this.anim_frame += this.anim_step_idle
+                end
+
+                this.draw_offset_y = 0
+                
+            -- run
+            else
+                this.anim_frame += this.anim_step_run
+
+                if this.anim_frame >= 4 then
+                    this.anim_frame = mid(0, this.anim_frame - 4, 3.99)
+                end
+
+                if flr(this.anim_frame) == 0 then
+                    this.sprite = 4
+                    this.draw_offset_y = 0
+                elseif flr(this.anim_frame) == 1 then
+                    this.sprite = 5
+                    this.draw_offset_y = -1
+                elseif flr(this.anim_frame) == 2 then
+                    this.sprite = 4
+                    this.draw_offset_y = 0
+                elseif flr(this.anim_frame) == 3 then
+                    this.sprite = 6
+                    this.draw_offset_y = -1
+                end
+            end
+        end
+
+        
+        -- walking
+        if btn(0) then
+            this.speed_x = -this.move_speed
+            this.flip_x = true
+        elseif btn(1) then
+            this.speed_x = this.move_speed
+            this.flip_x = false
+        else
+            this.speed_x = 0
+        end
+
+        -- jump
+        if btn(4) and this.is_on_floor then
+            this.speed_y = -this.jump_speed
+            this.sprite = 5
+            this.draw_offset_y = 0
+            sfx(6)
+        end
+
+        -- crate pickup / throw
+        if btnp(5) then
+            if this.is_holding_crate then
+                
+                if btn(3) then
+                    this.crate_drop(this)
+                elseif btn(2) then
+                    this.crate_throw_high(this)
+                else
+                    this.crate_throw(this)
+                end
+                
+            else
+
+                local dir = sgn(numbool(not this.flip_x) - 1)
+                local e = entity_check(this, this.x + 4 * dir, this.y, class_crate)
+                if e != nil then
+                    local offset = this.crate_find_space(this, e)
+                    if offset then
+                        this.crate_pickup(this)
+                        this.x += offset
+                        del(ent_table, e)
+                    end
+                end
+
+            end
+        end
+
+        -- crate push
+        local dir = sgn(numbool(not this.flip_x) - 1)
+        local e = entity_check(this, this.x + 1 * dir, this.y, class_crate)
+        if e != nil then
+            local hit = move_x(e, 1 * dir)
+            if not hit then
+                sfx(1)
+            end
+        end
+        
+
+    end,
+
+    draw = function(this)
+        if not this.is_holding_crate then
+            -- debug collider
+            --rectfill(this.x - 2, this.y - 8, this.x + 5, this.y + 6, 11)
+            class_base.draw(this)
+        else
+            -- debug collider
+            --rectfill(this.x, this.y, this.x + this.hitbox_x - 1, this.y + this.hitbox_y - 1, 11)
+            
+            -- offset y for crate
+            local oy = numbool(this.sprite == 7)
+
+            -- draw body
+            spr(this.sprite, this.x, this.y + 7 + this.draw_offset_y, 1, 1, this.flip_x, this.flip_y)
+
+            -- draw crate
+            spr(class_crate.sprite, this.x, this.y + oy + this.draw_offset_y)
+        end
+    end,
+
+    crate_pickup = function(this)
+        this.is_holding_crate = true
+        this.x -= 2
+        this.y -= 8
+        this.sprite_x = 0
+        this.sprite_y = 0
+        this.hitbox_x = 8
+        this.hitbox_y = 15
+        sfx(2)
+    end,
+
+    crate_create = function(this)
+        this.is_holding_crate = false
+        this.sprite_x = class_player.sprite_x
+        this.sprite_y = class_player.sprite_y
+        this.hitbox_x = class_player.hitbox_x
+        this.hitbox_y = class_player.hitbox_y
+        this.x += 2
+        this.y += 8
+        return entity_create(class_crate, this.x - 2, this.y - 8)
+    end,
+
+    crate_drop = function(this)
+        local c = this.crate_create(this)
+        local dir = sgn(numbool(not this.flip_x) - 1)
+        c.speed_x = this.speed_drop_x * dir
+        c.speed_y = this.speed_drop_y
+        sfx(4)
+    end,
+
+    crate_throw = function(this)
+        local c = this.crate_create(this)
+        local dir = sgn(numbool(not this.flip_x) - 1)
+        c.speed_x = this.speed_throw_x * dir
+        c.speed_y = this.speed_throw_y
+        sfx(3)
+    end,
+
+    crate_throw_high = function(this)
+        local c = this.crate_create(this)
+        local dir = sgn(numbool(not this.flip_x) - 1)
+        c.speed_x = this.speed_throw_high_x * dir
+        c.speed_y = this.speed_throw_high_y
+        sfx(5)
+    end,
+
+    crate_check_space = function(finder, ignore)
+        local check = false
+        check = check_solid_tile_overlap(finder)
+
+        if not check then
+            local e = entity_check(finder, finder.x, finder.y, class_crate, ignore)
+            if e != nil then
+                check = true
+            end
+        end
+
+        return check
+    end,
+
+    crate_find_space = function(this, ignore)
+        local offset = nil
+        local finder = {}
+        finder.x = this.x - 2
+        finder.y = this.y - 8
+        finder.hitbox_x = 8
+        finder.hitbox_y = 15
+
+        -- wiggle around a look for an open space
+        local check = false
+        check = this.crate_check_space(finder, ignore)
+        if check then
+            finder.x = this.x - 2 + 1
+            check = this.crate_check_space(finder, ignore)
+            if check then
+                finder.x = this.x - 2 - 1
+                check = this.crate_check_space(finder, ignore)
+                if check then
+                    finder.x = this.x - 2 + 2
+                    check = this.crate_check_space(finder, ignore)
+                    if check then
+                        finder.x = this.x - 2 - 2
+                        check = this.crate_check_space(finder, ignore)
+                        if check then
+                            offset = nil
+                        else
+                            offset = -2
+                        end
+                    else
+                        offset = 2
+                    end
+                else
+                    offset = -1
+                end
+            else
+                offset = 1
+            end
+        else
+            offset = 0
+        end
+
+        return offset
+    end,
+
+}
+add(classes, class_player)
+
+class_crate = {
+    name = "crate",
+    sprite = 1,
+    sprite_up = 2,
+    sprite_left = 3,
+
+    is_moving = true,
+    is_solid = true,
+    is_colliding = true,
+    is_using_gravity = true,
+
+    update = function(this)
+        if this.speed_x != 0 and this.is_on_floor then
+            this.speed_x = 0
+        end
+    end,
+}
+add(classes, class_crate)
+
+class_exit = {
+    name = "exit",
+    sprite = 21,
+    sprite_x = 1,
+    sprite_y = 1,
+    hitbox_x = 6,
+    hitbox_y = 6,
+
+    is_growing = false,
+    grow_speed = 0.1,
+    radius = 5,
+    radius_min = 1.1,
+    radius_max = 5.9,
+
+    color_fill = 7,
+    color_outline = 12,
+
+    particle_table = {},
+    particle_count = 5,
+    particle_speed = 0.2,
+    particle_color = 7,
+
+    init = function(this)
+        this.particle_table = {}
+        -- create particles
+        for i = 1, this.particle_count do
+            local p = {
+                x = (this.x + 2) + rnd(this.radius * 2) - this.radius,
+                y = this.y + 10 - i * 2,
+            }
+
+            add(this.particle_table, p)
+        end
+
+    end,
+
+    update = function(this)
+        -- move particles
+        for p in all(this.particle_table) do
+            p.y -= this.particle_speed
+            if p.y < this.y - 8 then
+                p.y = this.y + 2
+                p.x = (this.x + 2) + rnd(this.radius * 2) - this.radius
+            end
+        end
+
+        -- grow and shrink
+        if this.is_growing then
+            this.radius += this.grow_speed
+            if this.radius >= this.radius_max then
+                this.is_growing = false
+            end
+        else
+            this.radius -= this.grow_speed
+            if this.radius <= this.radius_min then
+                this.is_growing = true
+            end
+        end
+    end,
+
+    draw = function(this)
+        -- draw outline
+        circfill(this.x + 2, this.y + 2, this.radius + 2, this.color_outline)
+
+        -- draw circle
+        circfill(this.x + 2, this.y + 2, this.radius, this.color_fill)
+
+        -- draw particles
+        for p in all(this.particle_table) do
+            pset(p.x, p.y, this.particle_color)
+        end
+    end,
+
+}
+add(classes, class_exit)
+
+class_spike = {
+    name = "spike",
+    sprite = -1,
+}
+
+class_spike_top = {
+    name = "spike",
+    sprite = 17,
+
+    sprite_x = 1,
+    hitbox_x = 7,
+    hitbox_y = 5,
+    
+}
+add(classes, class_spike_top)
+
+class_spike_bottom = {
+    name = "spike",
+    sprite = 18,
+
+    sprite_y = 3,
+    hitbox_x = 7,
+    hitbox_y = 5,
+
+}
+add(classes, class_spike_bottom)
+
+class_spike_left = {
+    name = "spike",
+    sprite = 19,
+
+    hitbox_x = 5,
+    hitbox_y = 7,
+
+}
+add(classes, class_spike_left)
+
+class_spike_right = {
+    name = "spike",
+    sprite = 20,
+    
+    sprite_x = 3,
+    hitbox_x = 5,
+    hitbox_y = 7,
+
+}
+add(classes, class_spike_right)
+
+class_explode = {
+    name = "explode",
+    radius = 8,
+    color = 7,
+    color_outline = 5,
+
+    init = function(this)
+        sfx(0)
+    end,
+
+    update = function(this)
+        this.radius -= 0.5
+
+        if this.radius <= 0 then
+            entity_remove(this)
+        end
+    end,
+
+    draw = function(this)
+        circfill(this.x, this.y, this.radius + 2, this.color_outline)
+        circfill(this.x, this.y, this.radius, this.color)
+    end,
+}
+add(classes, class_explode)
+
+
+
+-- menu items
+menuitem(1, "reset level", map_load)
+
+function next_room()
+    room += 1
+    map_load()
+end
+
+menuitem(2, "next level", next_room)
+
+
+__gfx__
+00000000222222222222222200000000000000000000000000000000000000000000000000099990000000000099999000888880000000000088888000000000
+0000000022444422224aa42200000000009999900099999000999990000000000000000000099999000000000099999908ffffff00000000088fffff00000000
+007007002424424224aaaa42000000000099999900999999009999990099999000000000000fcfc00000000000fcffc008fcfffc0000000008fcfffc00000000
+00077000244224422aaaaaa20000000000fcffc000fcffc000fcffc00099999900000000000ffff00000000000fffff008fcfffc0000000008fcfffc00000000
+0007700024422442244aa4420000000000fffff000fffff000fffff000fcffc00000000000088800000000000088880008ffffff00000000088fffff00000000
+0070070024244242242aa24200000000008888000088880ff088880000fffff0000000000f8888f0000000000f8888f008888880000000000888888000000000
+0000000022444422224aa422000000000f8888f0f08888000088880f0088880000000000008008000000000000800800f888888f00000000f888888f00000000
+000000002222222222222222000000000080080008000080000880000f8888f00000000008800880000000000880088008000080000000000800008000000000
+66666666077707770000000077000000000000007777777700000000000000000000000000000000000000000000000000000000000000000000000000000000
+67777776077707770000000077770000000007777000000700000000000000000000000000000000000000000000000000000000000000000000000000000000
+67777776077700700000000077000000000777777077770700000000000000000000000000000000000000000000000000000000000000000000000000000000
+67777776007000700000070000000000000007777070070700000000000000000000000000000000000000000000000000000000000000000000000000000000
+67777776007000000700070077700000000000007070070700000000000000000000000000000000000000000000000000000000000000000000000000000000
+67777776000000000700777077777000000000777077770700000000000000000000000000000000000000000000000000000000000000000000000000000000
+67777776000000007770777077700000000077777000000700000000000000000000000000000000000000000000000000000000000000000000000000000000
+66666666000000007770777000000000000000777777777700000000000000000000000000000000000000000000000000000000000000000000000000000000
+11111111000000000000000000000000009999900000000000999990009999900099999000ddddd0000000000000000000888888000000000088888800000000
+1111111100000000000000000000000000999999009999900099999900999999009999990ddffff00000000000000000088fffff00000000088fffff00000000
+1111111100000000000000000000000000fcffc00099999900fcffc000fcffc000fcffc00df0ff00000000000000000008fcfffc0000000008fcfffc00000000
+1111111100000000000000000000000000fffff000fcffc0f8fffff000fffff000fffff00dfffff0000000000000000008fcfffc0000000008fcfffc00000000
+111111110000000000000000000000008888888888fffff80088880d888888888888888888888888000000000000000008ffffff00000000088fffff00000000
+11111111000000000000000000000000f088880ff088880fd8888f8df088880ff088880ff088880f000000000000000008888880000000000888888000000000
+111111110000000000000000000000000880088008800880d880088d08800dddddd00880088008800000000000000000f888888f00000000f888888f00000000
+11111111000000000000000000000000ddd00dddddd00dddd0000000ddd0000000000dddddd00ddd000000000000000008000080000000000800008000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000400000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000100000000010101010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000010100000001000000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000100000001000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000100000001010101010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000100000001000000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000100000001000000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01001010101010000010101010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000040000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01001010101010000010000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000010000010000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000010000010000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01001010101010000010101010100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01001000000000000000000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01001000000000000000000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01001010101010000000000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+__label__
+11166666116611161116161666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
+17177776617717161777171667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+17177776617717161117111667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+17177776617717166717771667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+11177176111711161117771667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+11177776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+66166666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
+11166666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+17777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+11177776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000006666666600000000000000000000000000000000000000000000000000000000000000000000000066666666
+67777776000000000000000000000000000000006777777600000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000006777777600000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000006777777600000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000006777777600000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000006777777600000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000006777777600000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000006666666600000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666
+66666666000000000000000000000000000000000000000000000000000000000000000000000000000000000000000066666666666666666666666666666666
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776677777766777777667777776
+67777776000000000000000000000000000000000000000000000000000000000000000000000000000000000000000067777776677777766777777667777776
+67777776000000000000000000000000000000000000000000000000000022222222000000000000000000000000000067777776677777766777777667777776
+67777776000000000000000000000000000000000000000000000000000022444422000000000000000000000000000067777776677777766777777667777776
+67777776000000000000000000000000000000000000000000000000000024244242000000000000000000000000000067777776677777766777777667777776
+67777776000000000000000000000000000000000000000000000000000024422442000000000000000000000000000067777776677777766777777667777776
+66666666000000000000000000000000000000000000000000000000000024422442000000000000000000000000000066666666666666666666666666666666
+66666666000000000000000000000000000000000000000000000000000024244242000000000000000000000000000066666666666666666666666666666666
+67777776000000000000000000000000000000000000000000009999900022444422000000000000000000000000000067777776677777766777777667777776
+67777776000000000000000000000000000000000000000000009999990022222222000000000000000000000000000067777776677777766777777667777776
+6777777600000000000000000000000000000000000000000000fcffc00000000000000000000000000000000000000067777776677777766777777667777776
+6777777600000000000000000000000000000000000000000000fffff00000000000000000000000000000000000000067777776677777766777777667777776
+67777776000000000000000000000000000000000000000000008888000000000000000000000000000000000000000067777776677777766777777667777776
+677777760000000000000000000000000000000000000000000f8888f00000000000000000000000000000000000000067777776677777766777777667777776
+66666666000000000000000000000000000000000000000000008008000000000000000000000000000000000000000066666666666666666666666666666666
+66666666000000000000000000000000000000006666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+66666666000000000000000000000000000000006666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
+66666666000000000000000000000000000000006666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776000000000000000000000000000000006777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+66666666000000000000000000000000000000006666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
+66666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
+67777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+67777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776677777766777777667777776
+66666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666
+
+__gff__
+0000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+__map__
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020101010101010102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202010101010101010101010101010101010202020202020202020202020202020202020202020100001000015102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1010101010101010101010101010101010000000000000000000000000000010101010101010101010101010101010102020202020100000000000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000000000000000001010000000000000000000000000150010100000000000000000000000000000102020202020100000000000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000000000000015001010000000000000000000000000000010100000000000000000000000001500102020202020100000000112102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000102020202020100000000010102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000102020202020101200000000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000000000000000001010000000000000000000000000000010100100040000000000000000000000102020202020101000010000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000040000000001000000000000001010000000000000000010101010101010101010101012121212121210101010102020202020100000000012102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1010101010101010101010101010101010000400000001000010101010101010101010101010101010101010101010102020202020100000000010102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202010101010101010101010101010101010202020202020202020202020202020202020202020100400000000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020101010101010102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
+1010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
+1000000000000000040000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000101010101000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000010000000000010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000010000000000010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000010000000000010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000101010101000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000010000000000010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000010000000000010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000010000000000010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000101010101000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
+__sfx__
+000e00003f6711b651096410363100621006113a70108701137011470111501147011470113701137011270111701107010d7010d7010c7010c7010c701006010060100601006010060100601006010060100601
+000500000044202402054020440200402004020040200402004020040200402004020040200402004020040200402004020040200402004020040200402004020040200402004020040200402004020040200402
+0003000002450064500a4500e45012450164401a4301e420224100040000400004000040000400004000040000400004000040000400004000040000400004000040000400004000040000400004000040000400
+00050000224501e4501a65016650126500e6400a63005620016100060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600
+000500000b450064501a650166400f630086200261005600016000060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600
+0005000022450264501a65016650126500e6400a63005620016100060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600006000060000600
+00040000240510c0010d0011200119001240012b0011b00122001260012a001000010000100001000010000100001000010000100001000010000100001000010000100001000010000100001000010000100001
+__music__
+00 40424344
+
