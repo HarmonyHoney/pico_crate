@@ -4,7 +4,16 @@ __lua__
 
 -- PICO-Crate
 -- by Harrison Monroe
--- a PICO-8 Cartridge
+-- http://Monroe.Games
+-- http://HarrisonMonroe.com
+-- 
+-- Music created by Gruber
+-- Pico-8 Tunes Volume 1
+-- https://www.lexaloffle.com/bbs/?tid=29008
+-- https://gruber99.bandcamp.com/album/pico-8-tunes-vol-1
+--
+-- Maps created in Tiled
+-- converted for tiled_room using tiled.py
 
 
 -- global vars
