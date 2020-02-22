@@ -6,21 +6,63 @@ __lua__
 ent_table = {}
 classes = {}
 
-room = 0
-room_x = 0
-room_y = 0
-
 flag_solid = 0
 
 gravity = 0.2
 
-test = "test"
-
+room = 5
+room_x = 0
+room_y = 0
+room_advance = false
 load_timer = 0
+
+room_text = {
+    "dont be pushy",
+    "pick me up",
+    "bridge the gap",
+    "time to throw down",
+    "up up up",
+    "this is a hold up",
+    "roomy dee",
+    "room7",
+    "room8",
+    "room9",
+    "room10",
+    "room11",
+    "room12",
+    "room13",
+    "room14",
+    "room15",
+    "room16",
+    "room17",
+    "room18",
+    "room19",
+    "room20",
+    "room21",
+    "room22",
+    "room23",
+    "room24",
+    "room25",
+    "room26",
+    "room27",
+    "room28",
+    "room29",
+    "room30",
+    "room31",
+}
+
 
 
 -- core loop
 function _init()
+    -- duplicate treadmill sprites
+    sprite_copy(22, 23)
+    sprite_copy(24, 25)
+
+    -- copy button wall sprites
+    sprite_copy(8, 9)
+    sprite_copy(12, 13)
+
     map_load()
 end
 
@@ -43,7 +85,6 @@ function _update60()
         end
     end
 
-
     if load_timer > 0 then
         load_timer -= 1
 
@@ -51,11 +92,9 @@ function _update60()
             map_load()
         end
     end
-
 end
 
 function _draw()
-    --cursor(0, 0)
     cls()
     --map()
     map(0, 0, 0, 0, 128, 64)
@@ -64,14 +103,24 @@ function _draw()
         e.draw(e)
     end
 
-    --cursor(room_x * 128, room_y * 128)
     color(8)
     print("stat: "..stat(1), room_x * 128, room_y * 128)
     print("ent: "..count(ent_table), room_x * 128, room_y * 128 + 7)
     print("room: "..room, room_x * 128, room_y * 128 + 14)
+
+    -- print room text
+    local text_length = #room_text[room + 1] * 4
+    local center_x = room_x * 128 + 64
+    local center_y = room_y * 128 + 122
+    -- background color
+    rectfill(center_x - (text_length / 2) - 1, center_y - 1, center_x + (text_length / 2) - 1, center_y + 5, 1)
+    -- text
+    color(7)
+    print(room_text[room + 1], center_x - (text_length / 2), center_y)
+
 end
 
--- global funcs
+-- functions
 
 -- too lazy to type + 0.5 every time
 function round(arg)
@@ -87,6 +136,85 @@ function numbool(arg)
     end
 end
 
+-- iterate though map tiles and create entities
+function map_load()
+    -- remove entities
+    ent_table = {}
+
+    -- reset toggleable walls
+    class_button_red.wall_unset()
+    class_button_green.wall_unset()
+
+    -- reload map data from cartridge
+    reload(0x2000, 0x2000, 0x1000)
+
+    -- advance room
+    if room_advance then
+        room_advance = false
+        room += 1
+    end
+
+    -- room position
+    local ry = flr(room / 8)
+    local rx = room - (ry * 8)
+
+    -- room coords
+    room_x = rx
+    room_y = ry
+    -- set camera
+    camera(room_x * 128, room_y * 128)
+
+    -- tile coords
+    ry = ry * 16
+    rx = rx * 16
+
+    -- look at map
+    for y = 0, 15 do
+        for x = 0, 15 do
+            local tile = mget(rx + x, ry + y)
+            if tile != 0 then
+                foreach(classes,
+                function(class)
+                    if class.sprite == tile then
+                        -- create entity
+                        local ent = entity_create(class, ((rx + x) * 8), ((ry + y) * 8))
+                        -- adjust position based on sprite offset
+                        ent.x += ent.sprite_x
+                        ent.y += ent.sprite_y
+
+                        -- clear tile on map
+                        if ent.is_remove_tile then
+                            mset(rx + x, ry + y, 0)
+                        end
+                    end
+                end)
+            end
+        end
+    end
+
+end
+
+-- copy and paste sprite on sheet
+function sprite_copy(copy, paste)
+    local source = sprite_first_byte(copy)
+    local dest = sprite_first_byte(paste)
+
+    for i = 0, 7 do
+        memcpy(tostr(dest + (i * 64), true), tostr(source + (i * 64), true), 4)
+    end
+
+end
+
+-- returns first top left byte of sprite as decimal
+function sprite_first_byte(sprite)
+    local y = flr(sprite / 16)
+    local x = sprite - (y * 16)
+
+    local byte = y * (64 * 8)
+    byte += x * 4
+
+    return byte
+end
 
 -- axis aligned bounding box
 -- description from: https://love2d.org/wiki/BoundingBox.lua
@@ -147,8 +275,8 @@ function check_solid_tile_y(this, distance)
     return check_left or check_right
 end
 
--- aabb but for tiles
-function check_solid_tile_overlap(this)
+-- aabb but for solid tiles
+function check_tile_solid(this)
     -- check 1, 2, 3, 4
     local c1 = false
     local c2 = false
@@ -169,30 +297,13 @@ function check_solid_tile_overlap(this)
     return c1 or c2 or c3 or c4
 end
 
--- only checks for solid entities
--- dx, dy = distance x and y
-function check_solid_entities(this, dx, dy)
-    local hit = false
-
-    for e in all(ent_table) do
-        if e != this and e.is_solid then
-            if aabb(this.x + dx, this.y + dy, this.hitbox_x, this.hitbox_y, e.x, e.y, e.hitbox_x, e.hitbox_y) then
-                hit = true
-                break
-            end
-        end
-    end
-
-    return hit
-end
-
 -- check tilemap, and then check entities
 function check_solid_x(this, distance)
     local hit = false
     hit = check_solid_tile_x(this, distance)
 
     if not hit then
-        hit = check_solid_entities(this, distance, 0)
+        hit = entity_check_solid(this, distance, 0) != nil
     end
 
     return hit
@@ -204,7 +315,7 @@ function check_solid_y(this, distance)
     hit = check_solid_tile_y(this, distance)
 
     if not hit then
-        hit = check_solid_entities(this, 0, distance)
+        hit = entity_check_solid(this, 0, distance) != nil
     end
 
     return hit
@@ -312,6 +423,11 @@ function entity_create(class, x, y)
     for k, v in pairs(class_base) do ent[k] = v end
 
     -- override keys from inherited class
+    if class.inherit_from != nil then
+        for k, v in pairs(class.inherit_from) do ent[k] = v end
+    end
+
+    -- override keys from actual class
     for k, v in pairs(class) do ent[k] = v end
 
     -- set position
@@ -347,56 +463,60 @@ function entity_check(this, x, y, class, ignore)
     return ent
 end
 
+-- only checks for solid entities
+-- dx, dy = distance x and y
+function entity_check_solid(this, dx, dy, ignore)
+    local ent = nil
 
--- iterate though map tiles and create entities
-function map_load()
-    -- remove entities
-    ent_table = {}
-
-    -- reload map data from cartridge
-    reload(0x2000, 0x2000, 0x1000)
-
-    -- room position
-    local ry = flr(room / 8)
-    local rx = room - (ry * 8)
-
-    -- room coords
-    room_x = rx
-    room_y = ry
-    -- set camera
-    camera(room_x * 128, room_y * 128)
-
-    -- tile coords
-    ry = ry * 16
-    rx = rx * 16
-
-    -- look at map
-    for y = 0, 15 do
-        for x = 0, 15 do
-            local tile = mget(rx + x, ry + y)
-            if tile != 0 then
-                foreach(classes,
-                function(class)
-                    if class.sprite == tile then
-                        -- create entity
-                        local ent = entity_create(class, ((rx + x) * 8), ((ry + y) * 8))
-                        -- adjust position based on sprite offset
-                        ent.x += ent.sprite_x
-                        ent.y += ent.sprite_y
-                        -- clear tile on map
-                        mset(rx + x, ry + y, 0)
-                    end
-                end)
+    for e in all(ent_table) do
+        if e != this and e.is_solid and e != ignore then
+            if aabb(this.x + dx, this.y + dy, this.hitbox_x, this.hitbox_y, e.x, e.y, e.hitbox_x, e.hitbox_y) then
+                ent = e
+                break
             end
         end
     end
 
+    return ent
 end
+
+function entity_check_moving(this, x, y, ignore)
+    local ent = nil
+
+    for e in all(ent_table) do
+        if e != this and e.is_moving and e != ignore then
+            if aabb(x, y, this.hitbox_x, this.hitbox_y, e.x, e.y, e.hitbox_x, e.hitbox_y) then
+                ent = e
+                break
+            end
+        end
+    end
+
+    return ent
+end
+
+-- move on treadmill
+function treadmill_move(this)
+    local dist = 0
+    local speed = 0.7
+    this.is_on_treadmill = false
+    local e = entity_check(this, this.x, this.y + 1, class_treadmill)
+    if e != nil then
+        this.remainder_x += e.tread_dir * speed
+        --move_x(this, e.tread_speed)
+        this.is_on_treadmill = true
+        dist = e.tread_speed
+    end
+
+    return dist
+end
+
 
 -- classes
 
--- all classes inherit from class_base
+-- all classes inherit from class_base before inherit_from
 class_base = {
+    inherit_from = nil,
     name = "base",
     x = 0,
     y = 0,
@@ -424,6 +544,8 @@ class_base = {
     is_solid = false,
     is_colliding = false,
     is_using_gravity = false,
+    is_on_treadmill = false,
+    is_remove_tile = true,
 
     has_moved_x = false,
     has_moved_y = false,
@@ -445,12 +567,13 @@ add(classes, class_base)
 
 class_player = {
     name = "player",
-    sprite = 4,
-    sprite_x = 2,
-    sprite_y = 1,
+    sprite = 2,
 
-    hitbox_x = 4,
-    hitbox_y = 7,
+    sprite_idle1 = 2,
+    sprite_idle2 = 3,
+    sprite_run1 = 4,
+    sprite_run2 = 5,
+    sprite_jump = 6,
 
     is_moving = true,
     is_solid = true,
@@ -466,7 +589,7 @@ class_player = {
 
     is_holding_crate = false,
 
-    speed_drop_x = 0.7,
+    speed_drop_x = 1,
     speed_drop_y = -1,
 
     speed_throw_x = 1.7,
@@ -475,18 +598,17 @@ class_player = {
     speed_throw_high_x = 0.7,
     speed_throw_high_y = -3.5,
 
-    init = function(this)
-        --this.pickup_crate(this)
-    end,
+    z_last = false,
+    x_last = false,
 
     update = function(this)
         -- check for spikes
         if entity_check(this, this.x, this.y, class_spike) != nil then
             if this.is_holding_crate then
-                this.crate_throw(this)
+                this.crate_drop(this)
             end
 
-            entity_create(class_explode, this.x + 1, this.y + 3)
+            entity_create(class_explode, this.x + 3, this.y + 3)
             entity_remove(this)
             load_timer = 30
             return 0
@@ -495,9 +617,9 @@ class_player = {
         -- check for exit
         if not this.is_holding_crate then
             if entity_check(this, this.x, this.y, class_exit) != nil then
-                entity_create(class_explode, this.x + 1, this.y + 3)
+                entity_create(class_explode, this.x + 3, this.y + 3)
                 entity_remove(this)
-                room += 1
+                room_advance = true
                 load_timer = 30
                 return 0
             end
@@ -514,9 +636,9 @@ class_player = {
                 end
 
                 if flr(this.anim_frame) == 0 then
-                    this.sprite = 4
+                    this.sprite = this.sprite_idle1
                 elseif flr(this.anim_frame) == 1 then
-                    this.sprite = 7
+                    this.sprite = this.sprite_idle2
                     -- this frame is half as long
                     this.anim_frame += this.anim_step_idle
                 end
@@ -532,16 +654,16 @@ class_player = {
                 end
 
                 if flr(this.anim_frame) == 0 then
-                    this.sprite = 4
+                    this.sprite = this.sprite_idle1
                     this.draw_offset_y = 0
                 elseif flr(this.anim_frame) == 1 then
-                    this.sprite = 5
+                    this.sprite = this.sprite_run1
                     this.draw_offset_y = -1
                 elseif flr(this.anim_frame) == 2 then
-                    this.sprite = 4
+                    this.sprite = this.sprite_idle1
                     this.draw_offset_y = 0
                 elseif flr(this.anim_frame) == 3 then
-                    this.sprite = 6
+                    this.sprite = this.sprite_run2
                     this.draw_offset_y = -1
                 end
             end
@@ -560,15 +682,17 @@ class_player = {
         end
 
         -- jump
-        if btn(4) and this.is_on_floor then
+        if btn(4) and not this.z_last and this.is_on_floor then
             this.speed_y = -this.jump_speed
-            this.sprite = 5
+            this.sprite = this.sprite_jump
             this.draw_offset_y = 0
             sfx(6)
         end
+        -- only jump on first press
+        this.z_last = btn(4)
 
         -- crate pickup / throw
-        if btnp(5) then
+        if btn(5) and not this.x_last then
             if this.is_holding_crate then
                 
                 if btn(3) then
@@ -594,81 +718,79 @@ class_player = {
 
             end
         end
+        -- only throw on first press
+        this.x_last = btn(5)
 
         -- crate push
-        local dir = sgn(numbool(not this.flip_x) - 1)
-        local e = entity_check(this, this.x + 1 * dir, this.y, class_crate)
+        local dir = this.get_dir(this)
+        local e = entity_check(this, this.x + dir, this.y, class_crate)
         if e != nil then
             local hit = move_x(e, 1 * dir)
             if not hit then
-                sfx(1)
+                --sfx(1)
             end
         end
         
-
+        treadmill_move(this)
     end,
 
     draw = function(this)
         if not this.is_holding_crate then
-            -- debug collider
-            --rectfill(this.x - 2, this.y - 8, this.x + 5, this.y + 6, 11)
             class_base.draw(this)
+            -- draw debug collider
+            --rect(this.x, this.y - 8, this.x + 7, this.y + 7, 11)
         else
-            -- debug collider
-            --rectfill(this.x, this.y, this.x + this.hitbox_x - 1, this.y + this.hitbox_y - 1, 11)
-            
             -- offset y for crate
-            local oy = numbool(this.sprite == 7)
+            local oy = numbool(this.sprite == this.sprite_idle2)
 
             -- draw body
-            spr(this.sprite, this.x, this.y + 7 + this.draw_offset_y, 1, 1, this.flip_x, this.flip_y)
+            spr(this.sprite, this.x, this.y + 8 + this.draw_offset_y, 1, 1, this.flip_x, this.flip_y)
 
             -- draw crate
             spr(class_crate.sprite, this.x, this.y + oy + this.draw_offset_y)
+
+            -- draw debug collider
+            --rect(this.x, this.y, this.x + this.hitbox_x - 1, this.y + this.hitbox_y - 1, 11)
         end
+    end,
+
+    get_dir = function(this)
+        return sgn(numbool(not this.flip_x) - 1)
     end,
 
     crate_pickup = function(this)
         this.is_holding_crate = true
-        this.x -= 2
         this.y -= 8
-        this.sprite_x = 0
-        this.sprite_y = 0
-        this.hitbox_x = 8
-        this.hitbox_y = 15
+        this.hitbox_y = 16
         sfx(2)
     end,
 
-    crate_create = function(this)
+    crate_release = function(this)
         this.is_holding_crate = false
-        this.sprite_x = class_player.sprite_x
-        this.sprite_y = class_player.sprite_y
-        this.hitbox_x = class_player.hitbox_x
-        this.hitbox_y = class_player.hitbox_y
-        this.x += 2
+        this.hitbox_y = 8
         this.y += 8
-        return entity_create(class_crate, this.x - 2, this.y - 8)
+        return entity_create(class_crate, this.x, this.y - 8)
     end,
 
     crate_drop = function(this)
-        local c = this.crate_create(this)
-        local dir = sgn(numbool(not this.flip_x) - 1)
+        local c = this.crate_release(this)
+        local dir = this.get_dir(this)
         c.speed_x = this.speed_drop_x * dir
         c.speed_y = this.speed_drop_y
         sfx(4)
     end,
 
     crate_throw = function(this)
-        local c = this.crate_create(this)
-        local dir = sgn(numbool(not this.flip_x) - 1)
+        local c = this.crate_release(this)
+        local dir = this.get_dir(this)
         c.speed_x = this.speed_throw_x * dir
         c.speed_y = this.speed_throw_y
         sfx(3)
     end,
 
     crate_throw_high = function(this)
-        local c = this.crate_create(this)
-        local dir = sgn(numbool(not this.flip_x) - 1)
+        local c = this.crate_release(this)
+        local dir = this.get_dir(this)
         c.speed_x = this.speed_throw_high_x * dir
         c.speed_y = this.speed_throw_high_y
         sfx(5)
@@ -676,7 +798,7 @@ class_player = {
 
     crate_check_space = function(finder, ignore)
         local check = false
-        check = check_solid_tile_overlap(finder)
+        check = check_tile_solid(finder)
 
         if not check then
             local e = entity_check(finder, finder.x, finder.y, class_crate, ignore)
@@ -691,42 +813,18 @@ class_player = {
     crate_find_space = function(this, ignore)
         local offset = nil
         local finder = {}
-        finder.x = this.x - 2
+        finder.x = this.x
         finder.y = this.y - 8
         finder.hitbox_x = 8
-        finder.hitbox_y = 15
+        finder.hitbox_y = 16
 
         -- wiggle around a look for an open space
-        local check = false
-        check = this.crate_check_space(finder, ignore)
-        if check then
-            finder.x = this.x - 2 + 1
-            check = this.crate_check_space(finder, ignore)
-            if check then
-                finder.x = this.x - 2 - 1
-                check = this.crate_check_space(finder, ignore)
-                if check then
-                    finder.x = this.x - 2 + 2
-                    check = this.crate_check_space(finder, ignore)
-                    if check then
-                        finder.x = this.x - 2 - 2
-                        check = this.crate_check_space(finder, ignore)
-                        if check then
-                            offset = nil
-                        else
-                            offset = -2
-                        end
-                    else
-                        offset = 2
-                    end
-                else
-                    offset = -1
-                end
-            else
-                offset = 1
+        for i in all({0, 1, -1, 2, -2}) do
+            finder.x = this.x + i
+            if not this.crate_check_space(finder, ignore) then
+                offset = i
+                break
             end
-        else
-            offset = 0
         end
 
         return offset
@@ -738,8 +836,6 @@ add(classes, class_player)
 class_crate = {
     name = "crate",
     sprite = 1,
-    sprite_up = 2,
-    sprite_left = 3,
 
     is_moving = true,
     is_solid = true,
@@ -750,6 +846,8 @@ class_crate = {
         if this.speed_x != 0 and this.is_on_floor then
             this.speed_x = 0
         end
+
+        treadmill_move(this)
     end,
 }
 add(classes, class_crate)
@@ -757,10 +855,10 @@ add(classes, class_crate)
 class_exit = {
     name = "exit",
     sprite = 21,
-    sprite_x = 1,
-    sprite_y = 1,
-    hitbox_x = 6,
-    hitbox_y = 6,
+    sprite_x = 2,
+    sprite_y = 2,
+    hitbox_x = 4,
+    hitbox_y = 4,
 
     is_growing = false,
     grow_speed = 0.1,
@@ -833,48 +931,45 @@ add(classes, class_exit)
 class_spike = {
     name = "spike",
     sprite = -1,
+    is_remove_tile = false,
+    draw = nil,
 }
 
 class_spike_top = {
-    name = "spike",
+    inherit_from = class_spike,
     sprite = 17,
 
-    sprite_x = 1,
-    hitbox_x = 7,
+    hitbox_x = 8,
     hitbox_y = 5,
-    
 }
 add(classes, class_spike_top)
 
 class_spike_bottom = {
-    name = "spike",
+    inherit_from = class_spike,
     sprite = 18,
 
     sprite_y = 3,
-    hitbox_x = 7,
+    hitbox_x = 8,
     hitbox_y = 5,
-
 }
 add(classes, class_spike_bottom)
 
 class_spike_left = {
-    name = "spike",
+    inherit_from = class_spike,
     sprite = 19,
 
     hitbox_x = 5,
-    hitbox_y = 7,
-
+    hitbox_y = 8,
 }
 add(classes, class_spike_left)
 
 class_spike_right = {
-    name = "spike",
+    inherit_from = class_spike,
     sprite = 20,
     
     sprite_x = 3,
     hitbox_x = 5,
-    hitbox_y = 7,
-
+    hitbox_y = 8,
 }
 add(classes, class_spike_right)
 
@@ -903,44 +998,159 @@ class_explode = {
 }
 add(classes, class_explode)
 
+class_treadmill = {
+    name = "treadmill",
+    is_solid = true,
+    tread_dir = 1,
+    offset = 0,
+
+    update = function(this)
+        this.offset += 0.2
+
+        if this.offset >= 8 then
+            this.offset -= 8
+        end
+    end,
+
+    draw = function(this)
+        sspr(flr(this.sheet_x + (this.offset * -this.tread_dir)), this.sheet_y, 8, 8, this.x, this.y)
+    end,
+
+}
+add(classes, class_treadmill)
+
+class_treadmill_left = {
+    inherit_from = class_treadmill,
+    sprite = 22,
+    tread_dir = -1,
+    sheet_x = 48,
+    sheet_y = 8,
+}
+add(classes, class_treadmill_left)
+
+class_treadmill_right = {
+    inherit_from = class_treadmill,
+    sprite = 24,
+    tread_dir = 1,
+    sheet_x = 72,
+    sheet_y = 8,
+}
+add(classes, class_treadmill_right)
+
+class_button_red = {
+    name = "button_red",
+    sprite = 7,
+
+    sprite_y = 5,
+    hitbox_y = 3,
+
+    is_pressed = false,
+    is_pressed_last = false,
+
+    update = function(this)
+        this.is_pressed_last = this.is_pressed
+        this.is_pressed = entity_check(this, this.x, this.y, class_crate) != nil or entity_check(this, this.x, this.y, class_player) != nil
+
+        if this.is_pressed and not this.is_pressed_last then
+            this.wall_set()
+            this.draw_offset_y = 2
+        elseif not this.is_pressed and this.is_pressed_last then
+            this.wall_unset()
+            this.draw_offset_y = 0
+        end
+    end,
+
+    wall_set = function()
+        fset(8, 0, true)
+        sprite_copy(10, 8)
+    end,
+
+    wall_unset = function()
+        fset(8, 0, false)
+        sprite_copy(9, 8)
+    end,
+}
+add(classes, class_button_red)
+
+class_button_green = {
+    name = "button_green",
+    sprite = 11,
+
+    sprite_y = 5,
+    hitbox_y = 3,
+
+    is_pressed = false,
+    is_pressed_last = false,
+
+    update = function(this)
+        this.is_pressed_last = this.is_pressed
+        this.is_pressed = entity_check(this, this.x, this.y, class_crate) != nil or entity_check(this, this.x, this.y, class_player) != nil
+
+        if this.is_pressed and not this.is_pressed_last then
+            this.wall_set()
+            this.draw_offset_y = 2
+        elseif not this.is_pressed and this.is_pressed_last then
+            this.wall_unset()
+            this.draw_offset_y = 0
+        end
+    end,
+
+    wall_set = function()
+        fset(12, 0, true)
+        sprite_copy(14, 12)
+    end,
+
+    wall_unset = function()
+        fset(12, 0, false)
+        sprite_copy(13, 12)
+    end,
+}
+add(classes, class_button_green)
 
 
 -- menu items
 menuitem(1, "reset level", map_load)
 
-function next_room()
-    room += 1
+function last_room()
+    room = max(0, room - 1)
     map_load()
 end
 
-menuitem(2, "next level", next_room)
+menuitem(2, "last room", last_room)
+
+function next_room()
+    room_advance = true
+    map_load()
+end
+
+menuitem(3, "next room", next_room)
 
 
 __gfx__
-00000000222222222222222200000000000000000000000000000000000000000000000000099990000000000099999000888880000000000088888000000000
-0000000022444422224aa42200000000009999900099999000999990000000000000000000099999000000000099999908ffffff00000000088fffff00000000
-007007002424424224aaaa42000000000099999900999999009999990099999000000000000fcfc00000000000fcffc008fcfffc0000000008fcfffc00000000
-00077000244224422aaaaaa20000000000fcffc000fcffc000fcffc00099999900000000000ffff00000000000fffff008fcfffc0000000008fcfffc00000000
-0007700024422442244aa4420000000000fffff000fffff000fffff000fcffc00000000000088800000000000088880008ffffff00000000088fffff00000000
-0070070024244242242aa24200000000008888000088880ff088880000fffff0000000000f8888f0000000000f8888f008888880000000000888888000000000
-0000000022444422224aa422000000000f8888f0f08888000088880f0088880000000000008008000000000000800800f888888f00000000f888888f00000000
-000000002222222222222222000000000080080008000080000880000f8888f00000000008800880000000000880088008000080000000000800008000000000
-66666666077707770000000077000000000000007777777700000000000000000000000000000000000000000000000000000000000000000000000000000000
-67777776077707770000000077770000000007777000000700000000000000000000000000000000000000000000000000000000000000000000000000000000
-67777776077700700000000077000000000777777077770700000000000000000000000000000000000000000000000000000000000000000000000000000000
-67777776007000700000070000000000000007777070070700000000000000000000000000000000000000000000000000000000000000000000000000000000
-67777776007000000700070077700000000000007070070700000000000000000000000000000000000000000000000000000000000000000000000000000000
-67777776000000000700777077777000000000777077770700000000000000000000000000000000000000000000000000000000000000000000000000000000
-67777776000000007770777077700000000077777000000700000000000000000000000000000000000000000000000000000000000000000000000000000000
-66666666000000007770777000000000000000777777777700000000000000000000000000000000000000000000000000000000000000000000000000000000
-11111111000000000000000000000000009999900000000000999990009999900099999000ddddd0000000000000000000888888000000000088888800000000
-1111111100000000000000000000000000999999009999900099999900999999009999990ddffff00000000000000000088fffff00000000088fffff00000000
-1111111100000000000000000000000000fcffc00099999900fcffc000fcffc000fcffc00df0ff00000000000000000008fcfffc0000000008fcfffc00000000
-1111111100000000000000000000000000fffff000fcffc0f8fffff000fffff000fffff00dfffff0000000000000000008fcfffc0000000008fcfffc00000000
-111111110000000000000000000000008888888888fffff80088880d888888888888888888888888000000000000000008ffffff00000000088fffff00000000
-11111111000000000000000000000000f088880ff088880fd8888f8df088880ff088880ff088880f000000000000000008888880000000000888888000000000
-111111110000000000000000000000000880088008800880d880088d08800dddddd00880088008800000000000000000f888888f00000000f888888f00000000
-11111111000000000000000000000000ddd00dddddd00dddd0000000ddd0000000000dddddd00ddd000000000000000008000080000000000800008000000000
+000000002222222200999990000000000099999000999990009999900000000088088088880000888888888800000000bb0bb0bb88000088bbbbbbbb00000000
+000000002244442200999999009999900099999900999999009999990000000080000008888008888222222800000000b000000b88800888b333333b00000000
+007007002424424200fcffc00099999900fcffc000fcffc000fcffc000000000000000000888888082222228000000000000000008888880b333333b00000000
+000770002442244200fffff000fcffc000fffff000fffff0f8fffff00000000080000008008888008222222800000000b000000b00888800b333333b00000000
+00077000244224428888888888fffff888888888888888880088880d0000000080000008008888008222222800000000b000000b00888800b333333b00000000
+0070070024244242f088880ff088880ff088880ff088880fd8888f8d088888800000000008888880822222280bbbbbb00000000008888880b333333b00000000
+0000000022444422088008800880088008800dddddd00880d880088d88888888800000088880088882222228bbbbbbbbb000000b88800888b333333b00000000
+0000000022222222ddd00dddddd00dddddd0000000000dddd000000088888888880880888800008888888888bbbbbbbbbb0bb0bb88000088bbbbbbbb00000000
+666666660777077700000000770000000000000000cccc0055559995880000885999555588000088000000000000000000000000000000000000000000000000
+67777776077707770000000077770000000007770c7777c055599955888008885599955588800888000000000000000000000000000000000000000000000000
+6777777607770070000000007700000000077777c777777c55999555088888805559995508888880000000000000000000000000000000000000000000000000
+6777777600700070000007000000000000000777c777777c59995555008888005555999500888800000000000000000000000000000000000000000000000000
+6777777600700000070007007770000000000000c777777c59995555008888005555999500888800000000000000000000000000000000000000000000000000
+6777777600000000070077707777700000000077c777777c55999555088888805559995508888880000000000000000000000000000000000000000000000000
+67777776000000007770777077700000000077770c7777c055599955888008885599955588800888000000000000000000000000000000000000000000000000
+666666660000000077707770000000000000007700cccc0055559995880000885999555588000088000000000000000000000000000000000000000000000000
+11111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+11111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -985,7 +1195,7 @@ __gfx__
 01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
 01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
 01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
-01000000400000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000000200000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
 01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
 01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
 01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
@@ -1017,7 +1227,7 @@ __gfx__
 01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
 01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
 01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
-01000040000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
+01000020000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
 01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
 01001010101010000010000000100001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
 01000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001
@@ -1179,24 +1389,24 @@ __gff__
 0000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __map__
-2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
-2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020101010101010102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-2020202020202020202020202020202010101010101010101010101010101010202020202020202020202020202020202020202020100001000015102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-1010101010101010101010101010101010000000000000000000000000000010101010101010101010101010101010102020202020100000000000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-1000000000000000000000000000001010000000000000000000000000150010100000000000000000000000000000102020202020100000000000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-1000000000000000000000000015001010000000000000000000000000000010100000000000000000000000001500102020202020100000000112102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-1000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000102020202020100000000010102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-1000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000102020202020101200000000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-1000000000000000000000000000001010000000000000000000000000000010100100040000000000000000000000102020202020101000010000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-1000040000000001000000000000001010000000000000000010101010101010101010101012121212121210101010102020202020100000000012102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-1010101010101010101010101010101010000400000001000010101010101010101010101010101010101010101010102020202020100000000010102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-2020202020202020202020202020202010101010101010101010101010101010202020202020202020202020202020202020202020100400000000102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020101010101010102020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
-2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020201010101010101010101010101010101010101010101010101010101010101010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020201010101010101020202020202010101010101010101010101020201000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020201000000000151020202020202010000000000000000000001020201000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202010101010101010101010202020202020202020202020202020202020202020202020202020202020202020202020202020201000000000001020202020202010000000000000000000001020201000000000000000000000000000001010000000000000000000000000000010
+2020101010101010101010101010202020202010000000000000000010202020202010101010101010101010101020202020201010101010101010101020202020202020201000000000001020202020202010100000000000000000001020201000000000000000000000000000001010000000000000000000000000000010
+2020100000000000000000000010202020202010000000000000150010202020202010000000000000000000001020202020201000000000150000001020202020202020201000000000121020202020202010000000000000000000001020201000000000000000000000000000001010000000000000000000000000000010
+2020100000000000000000150010202020202010000000000000000010202020202010000000000000000000151020202020201000000000000000001020202020202020201000000000101020202020202010000000000000000000001020201000000000000000000000000000001010000000000000000000000000000010
+2020100000000000000000000010202020202010000000000000000010202020202010000000000000000000001020202020201000000000000000001020202020202020201000000000001020202020101010000000000000000000001020201000000000000000000000000000001010000000000000000000000000000010
+2020100000000000000000000010202020202010000000000000000010202020202010000000000000000000001020202020201000000000000000001020202020202020201012000000001020202020100000000000000000000015001020201000000000000000000000000000001010000000000000000000000000000010
+2020100000000000000000000010202020202010000000000000000010202020202010010002000000000000001020202020201000000000000000001020202020202020201010000000001020202020100000000002000000000000001020201000000000000000000000000000001010000000000000000000000000000010
+2020100002000001000000000010202020202010000000000010101010202020202010101010101212121212121020202020201000000101000200001020202020202020201000000000001020202020100b00070001000000000000001020201000000000000000000000000000001010000000000000000000000000000010
+20201010101010101010101010102020202020100200000100101010102020202020101010101010101010101010202020202010121210101010121210202020202020202010010000001210202020201010101010100c0c0c080808081020201000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202010101010101010101010202020202020202020202020202020202020202020201010101010101010101020202020202020201001000000101020202020202010101010000000000000001020201000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020201001000200001020202020202010101010121212121212121020201000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020201010101010101020202020202010101010101010101010101020201000000000000000000000000000001010000000000000000000000000000010
+2020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020201010101010101010101010101010101010101010101010101010101010101010
 1010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010
-1000000000000000040000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
+1000000000000000020000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
 1000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
 1000000000000101010101000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
 1000000000010000000000010000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010100000000000000000000000000000101000000000000000000000000000001010000000000000000000000000000010
