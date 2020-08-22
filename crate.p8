@@ -3,10 +3,9 @@ version 18
 __lua__
 
 -- PICO-Crate
--- by Harrison Monroe
--- http://Monroe.Games
--- http://HarrisonMonroe.com
--- 
+-- by Harmony Monroe
+-- 2DHarmony.com 
+--
 -- Music created by Gruber
 -- Pico-8 Tunes Volume 1
 -- https://www.lexaloffle.com/bbs/?tid=29008
