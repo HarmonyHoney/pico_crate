@@ -3,8 +3,8 @@ version 29
 __lua__
 
 -- PICO-Crate
--- by Harmony Monroe
--- 2DHarmony.com 
+-- by Harmony Honey
+-- HarmonyHunnie.com 
 --
 -- Music created by Gruber
 -- Pico-8 Tunes Volume 1
@@ -851,7 +851,7 @@ class_player = {
             end
         elseif btn_press(5) then
             local dir = sgn(numbool(not this.flip_x) - 1)
-            local e = entity_check(this, this.x + 4 * dir, this.y, class_crate)
+            local e = entity_check(this, this.x, this.y + 1, class_crate)
             if e != nil then
                 local offset = this.crate_find_space(this, e)
                 if offset then
