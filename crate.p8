@@ -1,5 +1,5 @@
 pico-8 cartridge // http://www.pico-8.com
-version 29
+version 32
 __lua__
 
 -- PICO-Crate
@@ -31,10 +31,19 @@ load_timer = 0
 debug = false
 
 death_count = 0
-death_length = 0
+death_length = 4
 
+start_time = 0
 time_elapsed = 0
-is_timed = true
+time_min = "00"
+time_sec = "00"
+
+is_win = false
+win_time = 3600
+win_record = "0|00:00"
+win_length = 0
+
+
 
 tiled_room = {
     "0000000000000000000000000000000000000000000000000000000000009000000000000000a000000000000000a0000065555555555600005e000cc0e00500005010e00004e50000655555555556000000a0000000000000009000000000000000000000000000000000000000000000000000000000000000000000000000,walk (with arrow keys)",
@@ -63,14 +72,9 @@ tiled_room = {
 
 -- core loop
 function _init()
-
-    --title_screen()
-
     tiled_load()
     music(6)
-
 end
-
 
 function _update60()
     -- update
@@ -119,6 +123,18 @@ function _update60()
 
     -- needed for btn_press()
     btn_last_collect()
+
+    -- timer
+    time_elapsed = time() - start_time
+    time_min = tostr(flr(time_elapsed / 60))
+    time_sec = tostr(flr(time_elapsed % 60))
+    if #time_min == 1 then
+        time_min = "0"..time_min
+    end
+    if #time_sec == 1 then
+        time_sec = "0"..time_sec
+    end
+
 end
 
 function _draw()
@@ -132,50 +148,48 @@ function _draw()
     end
 
     -- death count
-    rectfill(0,0, 15 + death_length, 8, 0)
-    -- skull sprite
-    spr(9,1,0)
+    rectfill(0,0, 11 + death_length, 8, 0)
+    spr(9, 1, 0)
     print(death_count, 11, 2, 7)
 
-    -- time elapsed
-    if is_timed then
-        time_elapsed = time()
+    -- timer
+    rectfill(97, 0, 128, 8, 0)
+    print(time_min..":"..time_sec, 99, 2, 7)
+    spr(11, 120, 1)
+
+    -- winner
+    if is_win then
+        rectfill(62 - win_length / 2, 0, 64 + win_length / 2, 8, 0)
+        print(win_record, 64 - win_length / 2, 2, 11)
     end
 
-    local min = tostr(flr(time_elapsed / 60))
-    local sec = tostr(flr(time_elapsed % 60))
-    if #min == 1 then
-        min = "0"..min
+    -- room 1
+    if room == 1 then
+        print("pico-crate", 33, 16, 9)
+        print("by harmony honey", 21, 29, 10)
     end
-    if #sec == 1 then
-        sec = "0"..sec
-    end
-    rectfill(105, 0, 128, 8, 0)
-    print(min..":"..sec, 107, 2, 7)
+
+    -- room text
+    -- l = text_length, px = print_x, py = print_y
+    local l = #room_text * 4
+    local px = 64
+    local py = 122
+    rectfill(px - (l / 2) - 1, py - 1, px + (l / 2) - 1, py + 5, 0)
+    color(7)
+    print(room_text, px - (l / 2), py)
 
     -- debug text
     if debug then
         cursor(0, 8, 8)
         print("stat: "..stat(1))
-        print("ent: "..count(ent_table))
+        print("ent: "..#ent_table)
         print("room: "..room)
     end
-
-    -- print room text
-    -- l = text_length, px = print_x, py = print_y
-    local l = #room_text * 4
-    local px = 64
-    local py = 122
-    -- text box
-    rectfill(px - (l / 2) - 1, py - 1, px + (l / 2) - 1, py + 5, 0)
-    -- text
-    color(7)
-    print(room_text, px - (l / 2), py)
 end
 
 -- functions
 
--- too lazy to type + 0.5 every time
+-- easier than typing flr(arg + 0.5)
 function round(arg)
     return flr(arg + 0.5)
 end
@@ -200,11 +214,6 @@ function btn_press(arg)
     return btn(arg) and not btn_last[arg]
 end
 
--- title screen
-function title_screen()
-    -- test
-end
-
 -- custom map loader using data copied from tiled
 function tiled_load()
     -- clear entities
@@ -215,10 +224,24 @@ function tiled_load()
 
     -- advance room
     if room_change != 0 then
-        room_change = sgn(room_change)
-        room = mid(1, room + room_change, #tiled_room)
+        room = room + sgn(room_change)
+
+        -- you win
+        if room == #tiled_room + 1 then
+            is_win = true
+            if time_elapsed < win_time then
+                win_time = time_elapsed
+                win_record = tostr(death_count).."-"..time_min..":"..time_sec
+                win_length = #win_record * 4
+            end
+            room = 1
+            start_time = time()
+            death_count = 0
+        end
+
+        room = mid(1, room, #tiled_room)
+        room_change = 0
     end
-    room_change = 0
 
     local map = tiled_room[room]
 
@@ -734,6 +757,7 @@ class_player = {
         if this.speed_y > 0 and entity_check(this, this.x, this.y, class_spike) != nil then
             this.death(this)
             death_count += 1
+            death_length = #tostr(death_count) * 4
             return 0
         end
 
@@ -1184,14 +1208,14 @@ menuitem(4, "toggle debug", toggle_debug)
 
 
 __gfx__
-000000004444444400999990000000000099999000999990009999900000000000cccc0000000000000000000000000000000000000000000000000000000000
-00000000449999440099999900999990009999990099999900999999000000000c7777c007777770000000000000000000000000000000000000000000000000
-007007004949949400fcffc00099999900fcffc000fcffc000fcffc000000000c777777c77777777000000000000000000000000000000000000000000000000
-000770004994499400fffff000fcffc000fffff000fffff0f8fffff000000700c777777c77700700000000000000000000000000000000000000000000000000
-00077000499449948888888888fffff888888888888888880088880d07000700c777777c77700700000000000000000000000000000000000000000000000000
-0070070049499494f088880ff088880ff088880ff088880fd8888f8d07007770c777777c07777777000000000000000000000000000000000000000000000000
-0000000044999944088008800880088008800dddddd00880d880088d777077700c7777c000070707000000000000000000000000000000000000000000000000
-0000000044444444ddd00dddddd00dddddd0000000000dddd00000007770777000cccc0000000000000000000000000000000000000000000000000000000000
+000000004444444400999990000000000099999000999990009999900000000000cccc0000000000007777000077700000000000000000000000000000000000
+00000000449999440099999900999990009999990099999900999999000000000c7777c007777770070000700700070000000000000000000000000000000000
+007007004949949400fcffc00099999900fcffc000fcffc000fcffc000000000c777777c77777777700700077007007000000000000000000000000000000000
+000770004994499400fffff000fcffc000fffff000fffff0f8fffff000000700c777777c77700700700700077007707000000000000000000000000000000000
+00077000499449948888888888fffff888888888888888880088880d07000700c777777c77700700700077077000007000000000000000000000000000000000
+0070070049499494f088880ff088880ff088880ff088880fd8888f8d07007770c777777c07777777700000070700070000000000000000000000000000000000
+0000000044999944088008800880088008800dddddd00880d880088d777077700c7777c000070707070000700077700000000000000000000000000000000000
+0000000044444444ddd00dddddd00dddddd0000000000dddd00000007770777000cccc0000000000007777000000000000000000000000000000000000000000
 66577666d555555d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 6d576666577666650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 dd566666575555650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
