@@ -3,7 +3,7 @@ Made with [PICO-8](https://www.lexaloffle.com/pico-8.php), [Tiled](https://www.m
 
 Crate Chucking Puzzle Platformer 
 
-Play now on [itch.io](https://harmonyhoney.itch.io/pico-crate) ! (:
+Play on itch.io [harmonymonroe.itch.io/pico-crate](https://harmonymonroe.itch.io/pico-crate) ! (:
 
 Music from [Pico-8 Tunes Volume 1](https://www.lexaloffle.com/bbs/?tid=29008) by Gruber
 
